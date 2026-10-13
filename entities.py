@@ -2,6 +2,7 @@ import random
 from constants import *
 from combat import Stats, attack_roll, ranged_attack, gain_exp
 from items import Weapon, Armor, Potion, Scroll, Wand, Ring, Food, MissileWeapon, Gold, Seed
+QUICKSLOT_COUNT = 4
 
 CLASSES = {
     'Warrior':  {'hp': 30, 'str': 11, 'dex': 8,  'start_weapon': 'Short Sword', 'start_armor': 'Mail Armor'},
@@ -35,6 +36,7 @@ class Player:
         self.alive  = True
         self.messages = []
         self.regen_counter = 0
+        self.quickslots = [None] * QUICKSLOT_COUNT
         self._equip_start(cls)
 
     def _equip_start(self, cls):
