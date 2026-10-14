@@ -270,32 +270,37 @@ MISSILES_DEF = [
 ]
 
 
-def random_item(depth=1):
+def random_item(depth=1, cursed_chance=0.1):
     tier = min(5, (depth - 1) // 5 + 1)
     roll = random.random()
     if roll < 0.25:
-        return random.choice([f for f in WEAPONS if f().tier <= tier + 1])()
+        item = random.choice([f for f in WEAPONS if f().tier <= tier + 1])()
     elif roll < 0.40:
-        return random.choice([f for f in ARMORS if f().tier <= tier + 1])()
+        item = random.choice([f for f in ARMORS if f().tier <= tier + 1])()
     elif roll < 0.55:
         name, _ = random.choice(POTIONS_DEF)
-        return Potion(name, name)
+        item = Potion(name, name)
     elif roll < 0.68:
         name, _ = random.choice(SCROLLS_DEF)
-        return Scroll(name, name)
+        item = Scroll(name, name)
     elif roll < 0.75:
         name, charges = random.choice(WANDS_DEF)
-        return Wand(name, name, charges)
+        item = Wand(name, name, charges)
     elif roll < 0.80:
         name, power = random.choice(RINGS_DEF)
-        return Ring(name, name, power)
+        item = Ring(name, name, power)
     elif roll < 0.88:
         n, mn, mx, q = random.choice(MISSILES_DEF)
-        return MissileWeapon(n, mn, mx, q)
+        item = MissileWeapon(n, mn, mx, q)
     elif roll < 0.95:
-        return Food("Ration", 500) if random.random() < 0.7 else Food("Pasty", 250)
+        item = Food("Ration", 500) if random.random() < 0.7 else Food("Pasty", 250)
     else:
-        return Gold(random.randint(5, 30) * depth)
+        item = Gold(random.randint(5, 30) * depth)
+    # Assign cursed to equippable items
+    if item.itype in (WEAPON, ARMOR, RING) and random.random() < cursed_chance:
+        item.cursed = True
+        item.level  = -random.randint(1, 2)
+    return item
 
 
 def init_aliases():

@@ -41,6 +41,8 @@ class Enemy:
             return
 
         self.stats.tick_buffs()
+        if self.stats.has_buff('paralysis') or player.stats.has_buff('invisible'):
+            return
 
         dx = player.x - self.x
         dy = player.y - self.y

@@ -3,6 +3,40 @@ from constants import *
 from combat import Stats, attack_roll, ranged_attack, gain_exp
 from items import Weapon, Armor, Potion, Scroll, Wand, Ring, Food, MissileWeapon, Gold, Seed
 QUICKSLOT_COUNT = 4
+CLASS_ABILITIES = {
+    'Warrior': {
+        'id': 'shield_bash',
+        'name': 'Shield Bash',
+        'short_name': 'BASH',
+        'glyph': 'B',
+        'color': YELLOW,
+        'cooldown': 6,
+    },
+    'Mage': {
+        'id': 'arcane_bolt',
+        'name': 'Arcane Bolt',
+        'short_name': 'BOLT',
+        'glyph': '*',
+        'color': CYAN,
+        'cooldown': 5,
+    },
+    'Rogue': {
+        'id': 'smoke_veil',
+        'name': 'Smoke Veil',
+        'short_name': 'VEIL',
+        'glyph': 'S',
+        'color': PURPLE,
+        'cooldown': 7,
+    },
+    'Huntress': {
+        'id': 'pinning_shot',
+        'name': 'Pinning Shot',
+        'short_name': 'SHOT',
+        'glyph': 'P',
+        'color': GREEN,
+        'cooldown': 5,
+    },
+}
 
 CLASSES = {
     'Warrior':  {'hp': 30, 'str': 11, 'dex': 8,  'start_weapon': 'Short Sword', 'start_armor': 'Mail Armor'},
@@ -36,8 +70,81 @@ class Player:
         self.alive  = True
         self.messages = []
         self.regen_counter = 0
+        self.ability_cooldown = 0
         self.quickslots = [None] * QUICKSLOT_COUNT
         self._equip_start(cls)
+
+    @property
+    def ability_info(self):
+        return CLASS_ABILITIES[self.cls_name]
+
+    def use_ability(self, dungeon, messages):
+        ability = self.ability_info
+        if self.ability_cooldown > 0:
+            messages.append(
+                f"{ability['name']} is on cooldown ({self.ability_cooldown} turns).")
+            return False
+
+        ability_id = ability['id']
+        if ability_id == 'shield_bash':
+            targets = [enemy for enemy in dungeon.enemies
+                       if enemy.is_alive()
+                       and max(abs(enemy.x - self.x), abs(enemy.y - self.y)) == 1]
+            if not targets:
+                messages.append("Shield Bash needs an adjacent enemy.")
+                return False
+            target = min(targets, key=lambda enemy:
+                         abs(enemy.x - self.x) + abs(enemy.y - self.y))
+            damage = random.randint(3, 5) + self.stats.str_ // 3
+            self._ability_damage(target, damage, dungeon, messages, ability['name'])
+            if target.is_alive():
+                target.stats.add_buff('paralysis', 2)
+                messages.append(f"{target.name} is stunned!")
+        elif ability_id == 'arcane_bolt':
+            targets = self._visible_ability_targets(dungeon)
+            if not targets:
+                messages.append("No visible target for Arcane Bolt.")
+                return False
+            target = min(targets, key=lambda enemy:
+                         abs(enemy.x - self.x) + abs(enemy.y - self.y))
+            damage = random.randint(5, 8) + (self.stats.lvl - 1) * 2
+            self._ability_damage(target, damage, dungeon, messages, ability['name'])
+        elif ability_id == 'smoke_veil':
+            self.stats.add_buff('invisible', 6)
+            messages.append("Smoke Veil hides you from enemies!")
+        elif ability_id == 'pinning_shot':
+            targets = [enemy for enemy in self._visible_ability_targets(dungeon)
+                       if abs(enemy.x - self.x) + abs(enemy.y - self.y) <= 8]
+            if not targets:
+                messages.append("No nearby visible target for Pinning Shot.")
+                return False
+            target = min(targets, key=lambda enemy:
+                         abs(enemy.x - self.x) + abs(enemy.y - self.y))
+            damage = random.randint(3, 6) + self.stats.lvl - 1
+            self._ability_damage(target, damage, dungeon, messages, ability['name'])
+            if target.is_alive():
+                target.stats.add_buff('paralysis', 2)
+                messages.append(f"{target.name} is pinned!")
+
+        self.ability_cooldown = ability['cooldown'] + 1
+        return True
+
+    def _visible_ability_targets(self, dungeon):
+        return [enemy for enemy in dungeon.enemies
+                if enemy.is_alive() and dungeon.lit[enemy.x][enemy.y]]
+
+    def _ability_damage(self, enemy, damage, dungeon, messages, ability_name):
+        enemy.take_damage(damage)
+        messages.append(f"{ability_name} hits {enemy.name} for {damage}!")
+        if enemy.is_alive():
+            return
+        messages.append(f"{enemy.name} is defeated!")
+        gain_exp(self.stats, enemy.exp, messages)
+        for item in enemy.drop_loot(self.depth):
+            item.x, item.y = enemy.x, enemy.y
+            dungeon.items.append((enemy.x, enemy.y, item))
+        if enemy in dungeon.enemies:
+            dungeon.enemies.remove(enemy)
 
     def _equip_start(self, cls):
         from items import WEAPONS, ARMORS, Weapon, Armor
@@ -124,7 +231,9 @@ class Player:
             self._use_potion(item, dungeon, messages)
             self.remove_item(item)
         elif item.itype == SCROLL:
-            self._use_scroll(item, dungeon, messages)
+            result = self._use_scroll(item, dungeon, messages)
+            if result:  # needs item selection — don't remove yet
+                return result
             self.remove_item(item)
         elif item.itype == FOOD:
             self.hunger = min(BASE_HUNGER, self.hunger + item.nutrition)
@@ -135,9 +244,116 @@ class Player:
         elif item.itype in (WEAPON, ARMOR, RING, MISSILE):
             self.equip(item, messages)
 
+    def throw_potion(self, item, tx, ty, dungeon, messages):
+        """Throw a potion at tile (tx,ty). Identifies it and applies splash."""
+        item.identified = True
+        self.identified_potions.add(item.true_name)
+        self._identify_all(item.true_name, POTION, dungeon)
+        self.remove_item(item)
+
+        # Find enemy at target
+        target = next((e for e in dungeon.enemies if e.x == tx and e.y == ty and e.is_alive()), None)
+        e = item.effect
+        hit_self = (tx == self.x and ty == self.y)
+
+        messages.append(f"You throw a Potion of {item.true_name}!")
+
+        if e == 'healing':
+            if target:
+                heal = target.stats.max_hp // 3
+                target.stats.hp = min(target.stats.max_hp, target.stats.hp + heal)
+                messages.append(f"{target.name} is healed!")
+            elif hit_self:
+                heal = self.stats.max_hp // 2 + random.randint(1, 6)
+                self.stats.hp = min(self.stats.max_hp, self.stats.hp + heal)
+                messages.append(f"The potion splashes on you. (+{heal} HP)")
+
+        elif e == 'toxic gas':
+            messages.append("Toxic gas erupts!")
+            for en in dungeon.enemies:
+                if abs(en.x - tx) + abs(en.y - ty) <= 2:
+                    en.stats.add_buff('poison', 8)
+                    messages.append(f"{en.name} is poisoned!")
+            if abs(self.x - tx) + abs(self.y - ty) <= 2:
+                self.stats.add_buff('poison', 4)
+                messages.append("You are caught in the gas!")
+
+        elif e == 'liquid flame':
+            messages.append("Flames burst out!")
+            for en in dungeon.enemies:
+                if abs(en.x - tx) + abs(en.y - ty) <= 2:
+                    dmg = random.randint(6, 14)
+                    en.take_damage(dmg)
+                    messages.append(f"{en.name} takes {dmg} fire damage!")
+            if abs(self.x - tx) + abs(self.y - ty) <= 1:
+                dmg = random.randint(3, 7)
+                self.stats.hp -= dmg
+                messages.append(f"You are singed for {dmg}!")
+
+        elif e == 'frost':
+            messages.append("Ice shatters on impact!")
+            for en in dungeon.enemies:
+                if abs(en.x - tx) + abs(en.y - ty) <= 2:
+                    en.stats.add_buff('paralysis', 4)
+                    messages.append(f"{en.name} is frozen!")
+
+        elif e == 'paralysis':
+            if target:
+                target.stats.add_buff('paralysis', random.randint(3, 6))
+                messages.append(f"{target.name} is paralyzed!")
+
+        elif e == 'invisibility':
+            if hit_self or not target:
+                self.stats.add_buff('invisible', 20)
+                messages.append("The mist surrounds you — you vanish!")
+
+        elif e == 'levitation':
+            if hit_self or not target:
+                self.stats.add_buff('levitation', 20)
+                messages.append("You float up!")
+
+        elif e == 'mind vision':
+            self.stats.add_buff('mind_vision', 15)
+            messages.append("Your mind expands!")
+
+        elif e == 'strength':
+            if hit_self or not target:
+                self.stats.str_ += 1
+                messages.append("The potion splashes on you — you feel stronger!")
+
+        elif e == 'experience':
+            if hit_self or not target:
+                from combat import gain_exp
+                gain_exp(self.stats, self.stats.exp_next // 2, messages)
+
+        elif e == 'haste':
+            if hit_self or not target:
+                self.stats.add_buff('haste', 20)
+                messages.append("You feel fast!")
+            elif target:
+                target.stats.add_buff('haste', 10)
+                messages.append(f"{target.name} moves faster!")
+
+        elif e == 'mana':
+            if hit_self or not target:
+                for i in self.inventory:
+                    if i.itype == WAND:
+                        i.charges = min(i.max_charges, i.charges + 2)
+                messages.append("Your wands recharge!")
+
+    def _identify_all(self, true_name, itype, dungeon):
+        """Mark every copy of this potion/scroll as identified."""
+        for i in self.inventory:
+            if i.itype == itype and hasattr(i, 'true_name') and i.true_name == true_name:
+                i.identified = True
+        for _, _, i in dungeon.items:
+            if i.itype == itype and hasattr(i, 'true_name') and i.true_name == true_name:
+                i.identified = True
+
     def _use_potion(self, item, dungeon, messages):
         item.identified = True
         self.identified_potions.add(item.true_name)
+        self._identify_all(item.true_name, POTION, dungeon)
         e = item.effect
         if e == 'healing':
             heal = self.stats.max_hp // 2 + random.randint(1, 6)
@@ -185,38 +401,71 @@ class Player:
                     i.charges = min(i.max_charges, i.charges + 2)
             messages.append("Your wands feel recharged!")
 
+    def apply_scroll_to_item(self, scroll, target, dungeon, messages):
+        """Apply an interactive scroll effect to a chosen target item."""
+        e = scroll.effect
+        if e == 'identify':
+            target.identified = True
+            messages.append(f"Identified: {target.display_name()}")
+        elif e == 'upgrade':
+            target.level += 1
+            messages.append(f"{target.display_name()} glows and upgrades to +{target.level}!")
+        elif e == 'enchant weapon':
+            enchants = ['fire', 'poison', 'vampiric', 'lucky', 'swift']
+            target.enchantment = random.choice(enchants)
+            messages.append(f"{target.display_name()} is enchanted with {target.enchantment}!")
+        elif e == 'enchant armor':
+            glyphs = ['affection', 'anti-entropy', 'brimstone', 'camouflage', 'flow']
+            target.glyph = random.choice(glyphs)
+            messages.append(f"{target.display_name()} is enchanted!")
+        elif e == 'transmutation':
+            from items import random_item
+            self.remove_item(target)
+            new_item = random_item(self.depth)
+            self.add_item(new_item)
+            messages.append(f"{target.name} transmuted into {new_item.display_name()}!")
+        self.remove_item(scroll)
+
     def _use_scroll(self, item, dungeon, messages):
         item.identified = True
         self.identified_scrolls.add(item.true_name)
+        self._identify_all(item.true_name, SCROLL, dungeon)
         e = item.effect
+        # Interactive scrolls — defer to item_select state
         if e == 'identify':
-            messages.append("Choose an item to identify. (auto-identifying first unidentified)")
-            for i in self.inventory:
-                if not i.identified:
-                    i.identified = True
-                    messages.append(f"Identified: {i.display_name()}")
-                    break
+            unid = [i for i in self.inventory if not i.identified and i is not item]
+            if not unid:
+                messages.append("Nothing to identify."); return None
+            messages.append("Choose an item to identify.")
+            return {'action': 'identify', 'scroll': item}
+        elif e == 'upgrade':
+            targets = [i for i in self.inventory if i.itype in (WEAPON, ARMOR) and i is not item]
+            if not targets:
+                messages.append("Nothing to upgrade."); return None
+            messages.append("Choose an item to upgrade.")
+            return {'action': 'upgrade', 'scroll': item}
+        elif e == 'enchant weapon':
+            if not self.weapon:
+                messages.append("No weapon equipped."); return None
+            messages.append("Choose a weapon to enchant.")
+            return {'action': 'enchant_weapon', 'scroll': item}
+        elif e == 'enchant armor':
+            if not self.armor:
+                messages.append("No armor equipped."); return None
+            messages.append("Choose armor to enchant.")
+            return {'action': 'enchant_armor', 'scroll': item}
+        elif e == 'transmutation':
+            targets = [i for i in self.inventory if i not in (self.weapon, self.armor, self.ring1, self.ring2) and i is not item]
+            if not targets:
+                messages.append("Nothing to transmute."); return None
+            messages.append("Choose an item to transmute.")
+            return {'action': 'transmute', 'scroll': item}
+        # Immediate scrolls
         elif e == 'remove curse':
             for i in [self.weapon, self.armor, self.ring1, self.ring2]:
                 if i and i.cursed:
                     i.cursed = False
             messages.append("Your equipment glows with a golden light.")
-        elif e == 'upgrade':
-            equipped = [i for i in [self.weapon, self.armor] if i]
-            if equipped:
-                item_to_upgrade = random.choice(equipped)
-                item_to_upgrade.level += 1
-                messages.append(f"{item_to_upgrade.name} glows and upgrades to +{item_to_upgrade.level}!")
-        elif e == 'enchant weapon':
-            if self.weapon:
-                enchants = ['fire','poison','vampiric','lucky','swift']
-                self.weapon.enchantment = random.choice(enchants)
-                messages.append(f"Your {self.weapon.name} is enchanted with {self.weapon.enchantment}!")
-        elif e == 'enchant armor':
-            if self.armor:
-                glyphs = ['affection','anti-entropy','brimstone','camouflage','flow']
-                self.armor.glyph = random.choice(glyphs)
-                messages.append(f"Your {self.armor.name} is enchanted!")
         elif e == 'magic mapping':
             for x in range(dungeon.width):
                 for y in range(dungeon.height):
@@ -247,15 +496,6 @@ class Player:
                     dmg = random.randint(5, 15)
                     enemy.take_damage(dmg)
             messages.append("A psionic blast damages all visible enemies!")
-        elif e == 'transmutation':
-            from items import random_item
-            if self.inventory:
-                old = random.choice([i for i in self.inventory if i not in [self.weapon, self.armor]])
-                if old:
-                    self.remove_item(old)
-                    new_item = random_item(self.depth)
-                    self.add_item(new_item)
-                    messages.append(f"{old.name} transmuted into {new_item.display_name()}!")
 
     def _use_wand(self, item, dungeon, messages):
         if item.charges <= 0:
@@ -369,6 +609,8 @@ class Player:
     def tick(self, dungeon, messages):
         self.turns += 1
         expired = self.stats.tick_buffs()
+        if self.ability_cooldown > 0:
+            self.ability_cooldown -= 1
 
         # Hunger
         self.hunger -= HUNGER_RATE
@@ -414,8 +656,7 @@ class Player:
         tile = dungeon.get_tile(self.x, self.y)
         if (self.x, self.y) in dungeon.traps and not self.stats.has_buff('levitation'):
             if random.random() < 0.3:
-                trap_effects = ['damage', 'poison', 'teleport', 'alarm', 'gripping']
-                effect = random.choice(trap_effects)
+                effect = dungeon.traps[(self.x, self.y)]
                 if effect == 'damage':
                     dmg = random.randint(3, 8)
                     self.stats.hp -= dmg
@@ -435,7 +676,18 @@ class Player:
                 elif effect == 'gripping':
                     self.stats.add_buff('paralysis', 2)
                     messages.append("A gripping trap! You are held!")
-                dungeon.traps.discard((self.x, self.y))
+                elif effect == 'fire':
+                    dmg = random.randint(4, 10)
+                    self.stats.hp -= dmg
+                    messages.append(f"A fire trap! You take {dmg} damage!")
+                elif effect == 'chasm':
+                    self.stats.hp -= self.stats.max_hp // 4
+                    messages.append("You fall into a chasm!")
+                elif effect == 'disintegration':
+                    dmg = random.randint(8, 16)
+                    self.stats.hp -= dmg
+                    messages.append(f"A disintegration trap! You take {dmg} damage!")
+                dungeon.traps.pop((self.x, self.y), None)
 
         if self.stats.hp <= 0:
             self.alive = False

@@ -69,39 +69,70 @@ class DungeonMap:
     def _generate_rooms(self):
         special_pool = ['treasure', 'shop', 'garden', 'armory', 'library']
         random.shuffle(special_pool)
-        special_assigned = 0
+        columns = 4
+        rows = 4
+        cell_w = self.width // columns
+        cell_h = self.height // rows
+        rooms_by_row = []
+        row_counts = [3, 4, 3, 4]
+        random.shuffle(row_counts)
 
-        for _ in range(300):
-            w = random.randint(5, 11)
-            h = random.randint(5, 11)
-            x = random.randint(1, self.width  - w - 1)
-            y = random.randint(1, self.height - h - 1)
-            room = Room(x, y, w, h)
-            if any(room.intersects(r) for r in self.rooms):
-                continue
-            # Assign special kind to some rooms (not first or last)
-            if (special_assigned < len(special_pool) and
-                    len(self.rooms) > 0 and random.random() < 0.25):
-                room.kind = special_pool[special_assigned]
-                special_assigned += 1
-            self._carve_room(room)
-            if self.rooms:
-                self._connect(self.rooms[-1].center(), room.center())
-            self.rooms.append(room)
-            if len(self.rooms) >= 14:
-                break
+        for row, count in enumerate(row_counts):
+            selected_columns = sorted(random.sample(range(columns), count))
+            row_rooms = []
+            for column in selected_columns:
+                w = random.randint(7, 8)
+                h = random.randint(7, 8)
+                x = column * cell_w + random.randint(1, 2)
+                y = row * cell_h + random.randint(1, 2)
+                room = Room(x, y, w, h)
+                self._carve_room(room)
+                row_rooms.append((column, room))
+                self.rooms.append(room)
+            rooms_by_row.append(row_rooms)
+
+        connected_rooms = set()
+        for row_rooms in rooms_by_row:
+            for (_, first), (_, second) in zip(row_rooms, row_rooms[1:]):
+                self._connect(first.center(), second.center())
+                connected_rooms.add(frozenset((first, second)))
+
+        for upper, lower in zip(rooms_by_row, rooms_by_row[1:]):
+            _, first, second = min(
+                ((abs(col_a - col_b), room_a, room_b)
+                 for col_a, room_a in upper
+                 for col_b, room_b in lower),
+                key=lambda pair: pair[0],
+            )
+            self._connect(first.center(), second.center())
+            connected_rooms.add(frozenset((first, second)))
+
+        loop_candidates = [
+            (room_a, room_b)
+            for upper, lower in zip(rooms_by_row, rooms_by_row[1:])
+            for column_a, room_a in upper
+            for column_b, room_b in lower
+            if abs(column_a - column_b) <= 1
+            and frozenset((room_a, room_b)) not in connected_rooms
+        ]
+        for first, second in random.sample(loop_candidates, min(2, len(loop_candidates))):
+            self._connect(first.center(), second.center())
+
+        for room in self.rooms[1:-1]:
+            if special_pool and random.random() < 0.25:
+                room.kind = special_pool.pop()
 
     def _generate_boss_arena(self):
         # Large central arena
         cx, cy = self.width // 2 - 6, self.height // 2 - 6
         arena = Room(cx, cy, 13, 13, 'boss')
         self._carve_room(arena)
-        self.rooms.append(arena)
         # Entry corridor room
         entry = Room(2, self.height // 2 - 2, 6, 5)
         self._carve_room(entry)
         self._connect(entry.center(), arena.center())
         self.rooms.append(entry)
+        self.rooms.append(arena)
 
     def _carve_room(self, room):
         for x, y in room.inner_tiles():
