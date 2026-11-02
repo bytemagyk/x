@@ -266,13 +266,16 @@ class Game:
 
             # Click-to-move: one step per frame when no key held
             if self.state == 'playing' and self.mouse_path:
-                nx, ny = self.mouse_path.pop(0)
-                dx, dy = nx - self.player.x, ny - self.player.y
-                moved = self._try_move(dx, dy)
-                if moved:
-                    self._end_turn()
-                else:
+                if self._skip_paralyzed_turn():
                     self.mouse_path.clear()
+                else:
+                    nx, ny = self.mouse_path.pop(0)
+                    dx, dy = nx - self.player.x, ny - self.player.y
+                    moved = self._try_move(dx, dy)
+                    if moved:
+                        self._end_turn()
+                    else:
+                        self.mouse_path.clear()
 
             self._draw()
 
@@ -316,6 +319,9 @@ class Game:
                 ny = max(0, min(self.dungeon.height-1, self.cursor_y + dy))
                 self.cursor_x, self.cursor_y = nx, ny
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                if self._skip_paralyzed_turn():
+                    self.targeting = None
+                    return
                 self.player.throw_potion(self.targeting, self.cursor_x, self.cursor_y,
                                          self.dungeon, self.messages)
                 self.targeting = None
@@ -331,6 +337,9 @@ class Game:
             if mx < SIDEBAR_X:
                 self.cursor_x = mx // TILE_SIZE + self.cam_x
                 self.cursor_y = my // TILE_SIZE + self.cam_y
+                if self._skip_paralyzed_turn():
+                    self.targeting = None
+                    return
                 self.player.throw_potion(self.targeting, self.cursor_x, self.cursor_y,
                                          self.dungeon, self.messages)
                 self.targeting = None
@@ -381,6 +390,8 @@ class Game:
             mx, my = event.pos
             slot_index = quickslot_at(event.pos)
             if slot_index is not None:
+                if self._skip_paralyzed_turn():
+                    return
                 if self._activate_quickslot(slot_index):
                     self._end_turn()
                 return
@@ -416,6 +427,12 @@ class Game:
             pygame.K_y:(-1,-1), pygame.K_u:(1,-1),
             pygame.K_b:(-1,1),  pygame.K_n:(1,1),
         }
+        turn_keys = set(key_dirs) | {pygame.K_g, pygame.K_f, pygame.K_PERIOD,
+                                     pygame.K_COMMA, pygame.K_s, pygame.K_t}
+        if pygame.K_1 <= event.key <= pygame.K_4:
+            turn_keys.add(event.key)
+        if event.key in turn_keys and self._skip_paralyzed_turn():
+            return
 
         if event.key in key_dirs:
             self.mouse_path.clear()
@@ -512,7 +529,7 @@ class Game:
                 dmg = prev_hp - enemy.stats.hp
                 if dmg > 0:
                     self.float_texts.append(FloatText(str(dmg), enemy.x, enemy.y, RED))
-                if not enemy.is_alive():
+                if not enemy.is_alive() and enemy in d.enemies:
                     d.enemies.remove(enemy)
                 return True
 
@@ -574,6 +591,15 @@ class Game:
             d.items.remove(e)
         if not picked:
             self.messages.append("Nothing here.")
+
+    def _skip_paralyzed_turn(self):
+        if not self.player or not self.player.stats.has_buff('paralysis'):
+            return False
+        self.mouse_path.clear()
+        self.state = 'playing'
+        self.messages.append("You are paralyzed and lose a turn.")
+        self._end_turn()
+        return True
 
     def _end_turn(self):
         p = self.player; d = self.dungeon
@@ -641,6 +667,8 @@ class Game:
         elif event.key in (pygame.K_DOWN, pygame.K_j):
             self.inv_sel = min(len(items)-1, self.inv_sel+1)
         elif event.key == pygame.K_e and items:
+            if self._skip_paralyzed_turn():
+                return
             item = items[self.inv_sel]
             result = p.use_item(item, self.dungeon, self.messages)
             if result:  # interactive scroll needs item selection
@@ -711,14 +739,18 @@ class Game:
         items = self._select_items
         if event.key == pygame.K_ESCAPE:
             self.messages.append("Cancelled.")
-            self.player.remove_item(self._select_scroll)
             self._select_scroll = self._select_purpose = None
+            self._select_items = []
             self.state = 'playing'
         elif event.key in (pygame.K_UP, pygame.K_k):
             self.inv_sel = max(0, self.inv_sel - 1)
         elif event.key in (pygame.K_DOWN, pygame.K_j):
             self.inv_sel = min(len(items) - 1, self.inv_sel + 1)
         elif event.key == pygame.K_RETURN and items:
+            if self._skip_paralyzed_turn():
+                self._select_scroll = self._select_purpose = None
+                self._select_items = []
+                return
             target = items[self.inv_sel]
             self.player.apply_scroll_to_item(self._select_scroll, target, self.dungeon, self.messages)
             self._select_scroll = self._select_purpose = None
