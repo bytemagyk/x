@@ -31,7 +31,7 @@ class Stats:
 
 
 def lvl_exp(lvl):
-    return int(5 * (lvl ** 1.8))
+    return int(10 * (lvl ** 1.8))
 
 
 def attack_roll(attacker_stats, weapon, target_stats, armor):
@@ -85,6 +85,7 @@ def ranged_attack(attacker_stats, missile, target_stats, armor):
 
 def gain_exp(stats, amount, messages):
     stats.exp += amount
+    leveled_up = False
     while stats.exp >= stats.exp_next:
         stats.exp -= stats.exp_next
         stats.lvl += 1
@@ -93,5 +94,5 @@ def gain_exp(stats, amount, messages):
         stats.max_hp += hp_gain
         stats.hp = min(stats.max_hp, stats.hp + hp_gain)
         messages.append(f"Level up! You are now level {stats.lvl}!")
-        return True
-    return False
+        leveled_up = True
+    return leveled_up

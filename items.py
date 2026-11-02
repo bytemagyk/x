@@ -270,13 +270,17 @@ MISSILES_DEF = [
 ]
 
 
+def item_tier_for_depth(depth):
+    return min(5, (depth - 1) // 5 + 1)
+
+
 def random_item(depth=1, cursed_chance=0.1):
-    tier = min(5, (depth - 1) // 5 + 1)
+    tier = item_tier_for_depth(depth)
     roll = random.random()
     if roll < 0.25:
-        item = random.choice([f for f in WEAPONS if f().tier <= tier + 1])()
+        item = random.choice([f for f in WEAPONS if f().tier <= tier])()
     elif roll < 0.40:
-        item = random.choice([f for f in ARMORS if f().tier <= tier + 1])()
+        item = random.choice([f for f in ARMORS if f().tier <= tier])()
     elif roll < 0.55:
         name, _ = random.choice(POTIONS_DEF)
         item = Potion(name, name)

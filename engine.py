@@ -5,7 +5,9 @@ from constants import *
 from dungeon import DungeonMap
 from entities import Player
 from enemies import spawn_enemies
-from items import random_item, init_aliases, Gold, Potion, Scroll, Wand, Food, Weapon, Armor, Ring
+from items import (random_item, item_tier_for_depth, init_aliases, Gold,
+                   Potion, Scroll, Wand, Food, Weapon, Armor, Ring, WEAPONS,
+                   ARMORS)
 from saveload import save, load, has_save, delete_save
 from ui import (init_fonts, draw_hud, draw_messages, draw_map, draw_minimap,
                 draw_inventory, draw_item_select, draw_class_select, draw_game_over,
@@ -148,7 +150,7 @@ class Game:
         occupied = set()
 
         # Normal random items
-        count = len(self.dungeon.rooms) + random.randint(2, 5)
+        count = max(1, len(self.dungeon.rooms) // 2 + random.randint(1, 3))
         for _ in range(count):
             pos = self.dungeon.random_floor(occupied)
             if pos:
@@ -181,16 +183,19 @@ class Game:
             self.messages  # silent
 
         elif room.kind == 'armory':
+            tier = item_tier_for_depth(depth)
             for _ in range(3):
                 pos = self._room_floor(room, occupied)
                 if pos:
-                    w = random.choice([f() for f in __import__('items').WEAPONS])
+                    factories = [factory for factory in WEAPONS if factory().tier <= tier]
+                    w = random.choice(factories)()
                     self.dungeon.items.append((pos[0], pos[1], w))
                     occupied.add(pos)
             for _ in range(2):
                 pos = self._room_floor(room, occupied)
                 if pos:
-                    a = random.choice([f() for f in __import__('items').ARMORS])
+                    factories = [factory for factory in ARMORS if factory().tier <= tier]
+                    a = random.choice(factories)()
                     self.dungeon.items.append((pos[0], pos[1], a))
                     occupied.add(pos)
 

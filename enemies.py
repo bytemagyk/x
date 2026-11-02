@@ -15,7 +15,7 @@ class Enemy:
         self.x = self.y = 0
         self.state   = 'idle'   # idle, chase, flee
         self.path    = []
-        self.loot_chance = 0.3
+        self.loot_chance = 0.2
         self.abilities = []
         self.armor   = None
         self.weapon  = None
@@ -62,7 +62,11 @@ class Enemy:
 
     def _melee(self, player, messages):
         from items import Weapon
-        dummy_weapon = type('W', (), {'damage': lambda s: random.randint(1, self.stats.str_), 'level': 0, 'enchantment': None})()
+        dummy_weapon = type('W', (), {
+            'damage': lambda s: random.randint(1, max(1, self.stats.str_ // 2)),
+            'level': 0,
+            'enchantment': None,
+        })()
         hit, dmg, crit = attack_roll(self.stats, dummy_weapon, player.stats, player.armor)
         if hit:
             player.stats.hp -= dmg
@@ -137,8 +141,8 @@ class Enemy:
         loot = []
         if random.random() < self.loot_chance:
             loot.append(random_item(depth))
-        if random.random() < 0.4:
-            loot.append(Gold(random.randint(2, 10) * depth))
+        if random.random() < 0.25:
+            loot.append(Gold(random.randint(2, 6) * depth))
         return loot
 
 
@@ -168,7 +172,7 @@ def make_skeleton():
 def make_thief():
     e = Enemy("Thief", 't', ORANGE, 16, 8, 12, 8, 1)
     e.abilities = ['steal']
-    e.loot_chance = 0.6
+    e.loot_chance = 0.4
     return e
 
 def make_guard():
@@ -289,7 +293,7 @@ ENEMY_TABLE = {
 def spawn_enemies(dungeon, depth):
     table = ENEMY_TABLE.get(depth, [make_rat])
     is_boss = depth in BOSS_DEPTHS
-    count = 1 if is_boss else random.randint(4, 8)
+    count = 1 if is_boss else random.randint(3, 5)
     occupied = {(dungeon.stairs_up or (0,0)), (dungeon.stairs_down or (0,0))}
     for _ in range(count):
         factory = random.choice(table)

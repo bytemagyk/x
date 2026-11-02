@@ -542,6 +542,16 @@ def draw_map(surf, fonts, dungeon, player, cam_x, cam_y, sprites=None, float_tex
                 draw_bar(surf, sx, sy+TILE_SIZE-5, TILE_SIZE, 5,
                          enemy.stats.hp, enemy.stats.max_hp, RED, (40,0,0))
 
+    # Shopkeeper
+    if dungeon.shop_pos:
+        sx_s, sy_s = dungeon.shop_pos
+        if dungeon.lit[sx_s][sy_s]:
+            spx = (sx_s - cam_x) * TILE_SIZE
+            spy = (sy_s - cam_y) * TILE_SIZE
+            if 0 <= spx < SIDEBAR_X and 0 <= spy < SCREEN_H:
+                pygame.draw.rect(surf, (80, 60, 10), (spx, spy, TILE_SIZE, TILE_SIZE))
+                draw_text(surf, fonts, '@', spx+TILE_SIZE//4, spy+TILE_SIZE//4, YELLOW, 'med')
+
     # Player
     ppx = (player.x - cam_x) * TILE_SIZE
     ppy = (player.y - cam_y) * TILE_SIZE
@@ -552,16 +562,6 @@ def draw_map(surf, fonts, dungeon, player, cam_x, cam_y, sprites=None, float_tex
     else:
         pygame.draw.rect(surf, (30, 60, 120), (ppx, ppy, TILE_SIZE, TILE_SIZE))
         draw_text(surf, fonts, '@', ppx+TILE_SIZE//4, ppy+TILE_SIZE//4, WHITE)
-
-    # Shopkeeper
-    if dungeon.shop_pos:
-        sx_s, sy_s = dungeon.shop_pos
-        if dungeon.lit[sx_s][sy_s]:
-            spx = (sx_s - cam_x) * TILE_SIZE
-            spy = (sy_s - cam_y) * TILE_SIZE
-            if 0 <= spx < SIDEBAR_X and 0 <= spy < SCREEN_H:
-                pygame.draw.rect(surf, (80, 60, 10), (spx, spy, TILE_SIZE, TILE_SIZE))
-                draw_text(surf, fonts, '@', spx+TILE_SIZE//4, spy+TILE_SIZE//4, YELLOW, 'med')
 
     # Floating damage numbers
     for ft in float_texts:
